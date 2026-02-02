@@ -120,6 +120,142 @@ class PurchaseOrder(models.Model):
             self.date_order or fields.Date.today()
         )
 
+    def button_confirm(self):
+        """
+        Por qué: Informar tasa de cambio al confirmar orden de compra
+        Patrón: Observer Pattern - notificar evento de confirmación
+        """
+        res = super().button_confirm()
+
+        for order in self:
+            if order.currency_id != order.company_id.currency_id:
+                order._post_currency_rate_message('confirm')
+
+        return res
+
+    def write(self, vals):
+        """
+        Por qué: Detectar cambio en modo de impresión
+        """
+        old_print_flags = {rec.id: rec.print_in_company_currency for rec in self}
+
+        res = super().write(vals)
+
+        if 'print_in_company_currency' in vals:
+            for order in self:
+                old_value = old_print_flags.get(order.id)
+                if old_value != order.print_in_company_currency:
+                    order._post_print_mode_message()
+
+        return res
+
+    def _post_currency_rate_message(self, action_type='confirm'):
+        """
+        Por qué: Mensaje en chatter con información de tasa
+        Tip: Mismo formato que sale.order para consistencia
+        """
+        self.ensure_one()
+
+        rate = self._get_effective_rate()
+        rate_source = 'manual' if self.manual_currency_rate else 'sistema'
+
+        if action_type == 'confirm':
+            icon = '✅'
+            title = 'Orden de Compra Confirmada'
+            action_text = 'confirmada'
+        else:
+            icon = 'ℹ️'
+            title = 'Tipo de Cambio'
+            action_text = 'registrado'
+
+        message = f"""
+        <div style="padding: 10px; border-left: 4px solid #875a7b; background-color: #fef5ff; margin: 5px 0;">
+            <h4 style="margin: 0 0 10px 0; color: #875a7b;">
+                {icon} {title} - Tipo de Cambio Aplicado
+            </h4>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td style="padding: 5px; font-weight: bold; width: 40%;">Moneda del documento:</td>
+                    <td style="padding: 5px;">{self.currency_id.name} ({self.currency_id.symbol})</td>
+                </tr>
+                <tr>
+                    <td style="padding: 5px; font-weight: bold;">Moneda de la compañía:</td>
+                    <td style="padding: 5px;">{self.company_id.currency_id.name} ({self.company_id.currency_id.symbol})</td>
+                </tr>
+                <tr style="background-color: #f5e6ff;">
+                    <td style="padding: 5px; font-weight: bold;">Tipo de cambio aplicado:</td>
+                    <td style="padding: 5px; font-size: 16px; font-weight: bold; color: #875a7b;">
+                        1 {self.currency_id.name} = {rate:,.6f} {self.company_id.currency_id.name}
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 5px; font-weight: bold;">Origen de la tasa:</td>
+                    <td style="padding: 5px;">
+                        <span style="background-color: {'#ffd700' if rate_source == 'manual' else '#90ee90'};
+                                     padding: 2px 8px; border-radius: 3px; font-weight: bold;">
+                            {rate_source.upper()}
+                        </span>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 5px; font-weight: bold;">Total convertido:</td>
+                    <td style="padding: 5px;">
+                        {self.amount_total:,.2f} {self.currency_id.symbol} =
+                        <strong>{self.amount_total * rate:,.2f} {self.company_id.currency_id.symbol}</strong>
+                    </td>
+                </tr>
+            </table>
+            <p style="margin: 10px 0 0 0; font-size: 12px; color: #666; font-style: italic;">
+                Este tipo de cambio se aplicará en las facturas generadas desde esta orden de compra.
+            </p>
+        </div>
+        """
+
+        self.message_post(
+            body=message,
+            subject=f'Tipo de Cambio {action_text.capitalize()}',
+            message_type='notification',
+            subtype_xmlid='mail.mt_note'
+        )
+
+    def _post_print_mode_message(self):
+        """
+        Por qué: Notificar cambio en modo de impresión
+        """
+        self.ensure_one()
+
+        if self.print_in_company_currency:
+            icon = '🖨️'
+            mode = f'<strong style="color: #875a7b;">Moneda de la Compañía ({self.company_id.currency_id.name})</strong>'
+            explanation = f'Los reportes se imprimirán en {self.company_id.currency_id.name}, ' \
+                         f'aplicando la tasa de cambio configurada.'
+        else:
+            icon = '📄'
+            mode = f'<strong style="color: #875a7b;">Moneda Original ({self.currency_id.name})</strong>'
+            explanation = f'Los reportes se imprimirán en {self.currency_id.name}, ' \
+                         f'la moneda original del documento.'
+
+        message = f"""
+        <div style="padding: 10px; border-left: 4px solid #875a7b; background-color: #fef5ff; margin: 5px 0;">
+            <h4 style="margin: 0 0 10px 0; color: #875a7b;">
+                {icon} Modo de Impresión Modificado
+            </h4>
+            <p style="margin: 5px 0;">
+                <strong>Nuevo modo:</strong> {mode}
+            </p>
+            <p style="margin: 5px 0; font-size: 12px; color: #666; font-style: italic;">
+                {explanation}
+            </p>
+        </div>
+        """
+
+        self.message_post(
+            body=message,
+            subject='Modo de Impresión Modificado',
+            message_type='notification',
+            subtype_xmlid='mail.mt_note'
+        )
+
     @api.depends('order_line.price_subtotal')
     def _compute_amount_all(self):
         """

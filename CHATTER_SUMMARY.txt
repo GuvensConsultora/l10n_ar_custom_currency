@@ -1,0 +1,130 @@
+═══════════════════════════════════════════════════════════════════
+  LOGGING AUTOMÁTICO EN CHATTER - FUNCIONALIDAD IMPLEMENTADA
+═══════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. CONFIRMACIÓN DE PRESUPUESTO DE VENTA                        │
+├─────────────────────────────────────────────────────────────────┤
+│ Trigger:  sale.order.action_confirm()                          │
+│ Icono:    ✅                                                    │
+│ Color:    Azul turquesa (#00a09d)                              │
+│                                                                 │
+│ Información registrada:                                         │
+│   • Moneda documento vs moneda compañía                        │
+│   • Tipo de cambio aplicado (6 decimales)                      │
+│   • Origen: [MANUAL] o [SISTEMA]                               │
+│   • Total convertido                                            │
+│   • Nota: se aplicará en documentos derivados                  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. CONFIRMACIÓN DE ORDEN DE COMPRA                             │
+├─────────────────────────────────────────────────────────────────┤
+│ Trigger:  purchase.order.button_confirm()                      │
+│ Icono:    ✅                                                    │
+│ Color:    Púrpura (#875a7b)                                     │
+│                                                                 │
+│ Información registrada:                                         │
+│   • Moneda documento vs moneda compañía                        │
+│   • Tipo de cambio aplicado                                    │
+│   • Origen: [MANUAL] o [SISTEMA]                               │
+│   • Total convertido                                            │
+│   • Nota: se aplicará en facturas de proveedor                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. VALIDACIÓN DE FACTURAS                                      │
+├─────────────────────────────────────────────────────────────────┤
+│ Trigger:  account.move.action_post()                           │
+│                                                                 │
+│ Tipos soportados:                                               │
+│   📄 out_invoice   → Factura Cliente    (azul turquesa)        │
+│   📥 in_invoice    → Factura Proveedor  (púrpura)              │
+│   🔄 out_refund    → Nota Créd. Cliente (rojo)                 │
+│   ↩️  in_refund     → Nota Créd. Proveed. (rojo)               │
+│                                                                 │
+│ Información registrada:                                         │
+│   • Monedas involucradas                                        │
+│   • Tipo de cambio aplicado                                    │
+│   • Origen de la tasa                                           │
+│   • Fecha de referencia (invoice_date)                          │
+│   • Total convertido                                            │
+│   • Nota: aplicado en asientos contables                       │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. CAMBIO DE MODO DE IMPRESIÓN                                 │
+├─────────────────────────────────────────────────────────────────┤
+│ Trigger:  write({'print_in_company_currency': True/False})     │
+│                                                                 │
+│ Activar (True):                                                 │
+│   🖨️  "Modo: Moneda de la Compañía (ARS)"                      │
+│   → Reportes se imprimen en ARS                                │
+│   → Aplica tasa de cambio configurada                          │
+│                                                                 │
+│ Desactivar (False):                                             │
+│   📄 "Modo: Moneda Original (USD)"                              │
+│   → Reportes se imprimen en moneda documento                   │
+│   → Sin conversión                                              │
+└─────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════
+  CARACTERÍSTICAS VISUALES
+═══════════════════════════════════════════════════════════════════
+
+✓ Mensajes HTML estéticos con tablas organizadas
+✓ Bordes coloreados según tipo de documento
+✓ Iconos emoji para identificación rápida
+✓ Badges para origen de tasa:
+    [MANUAL]  → Badge dorado (#ffd700)
+    [SISTEMA] → Badge verde (#90ee90)
+✓ Colores corporativos de Odoo
+✓ Formato responsive y legible
+✓ No genera emails (solo visible en chatter)
+
+═══════════════════════════════════════════════════════════════════
+  BENEFICIOS
+═══════════════════════════════════════════════════════════════════
+
+1. AUDITORÍA COMPLETA
+   → Todo cambio registrado con timestamp
+   → Usuario que hizo el cambio identificado
+   → Historial inmutable
+
+2. TRANSPARENCIA
+   → Tasa aplicada visible para todos
+   → Origen claro (manual vs sistema)
+   → Total convertido calculado
+
+3. TRAZABILIDAD
+   → Búsqueda en comunicaciones
+   → Orden cronológico
+   → Acceso bajo demanda
+
+4. PROFESIONALISMO
+   → Formato estético y organizado
+   → Información estructurada
+   → Fácil lectura
+
+═══════════════════════════════════════════════════════════════════
+  IMPLEMENTACIÓN TÉCNICA
+═══════════════════════════════════════════════════════════════════
+
+Métodos agregados en sale.order, purchase.order, account.move:
+
+• action_confirm() / button_confirm() / action_post()
+  └─> Llama a _post_currency_rate_message()
+
+• write(vals)
+  └─> Detecta cambio en print_in_company_currency
+  └─> Llama a _post_print_mode_message()
+
+• _post_currency_rate_message(action_type)
+  └─> Genera HTML con información de tasa
+  └─> Usa message_post() para registrar
+
+• _post_print_mode_message()
+  └─> Genera HTML con información de modo
+  └─> Usa message_post() para registrar
+
+═══════════════════════════════════════════════════════════════════

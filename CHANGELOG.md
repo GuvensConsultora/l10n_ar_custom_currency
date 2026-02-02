@@ -1,5 +1,65 @@
 # Changelog - l10n_ar_custom_currency
 
+## [1.1.0] - 2026-02-02
+
+### Funcionalidades Agregadas
+
+#### Logging Automático en Chatter
+
+**Confirmación de Documentos:**
+- Registro automático en chatter al confirmar presupuestos de venta
+- Registro automático al confirmar órdenes de compra
+- Registro automático al validar facturas (cliente/proveedor/notas de crédito)
+- Información incluida:
+  * Monedas involucradas (documento y compañía)
+  * Tipo de cambio aplicado (6 decimales)
+  * Origen de la tasa (badge visual: manual/sistema)
+  * Total convertido
+  * Nota explicativa contextual
+
+**Cambio de Modo de Impresión:**
+- Registro automático al activar/desactivar `print_in_company_currency`
+- Indica modo nuevo (moneda compañía vs moneda original)
+- Explica implicaciones del cambio
+
+**Características:**
+- Mensajes estéticos con HTML
+- Iconos emoji identificativos
+- Colores según tipo de documento
+- Badges para origen de tasa (dorado=manual, verde=sistema)
+- No genera emails (solo visible en chatter)
+- Trazabilidad completa y auditable
+
+### Modelos Modificados
+
+**models/sale_order.py**
+- `action_confirm()`: override para logging
+- `write()`: detectar cambio en print_in_company_currency
+- `_post_currency_rate_message()`: generar mensaje HTML estético
+- `_post_print_mode_message()`: notificar cambio de modo
+
+**models/purchase_order.py**
+- `button_confirm()`: override para logging
+- `write()`: detectar cambio en print_in_company_currency
+- `_post_currency_rate_message()`: mensaje con color púrpura
+- `_post_print_mode_message()`: notificar cambio
+
+**models/account_move.py**
+- `action_post()`: override para logging en facturas
+- `write()`: detectar cambio en modo impresión
+- `_post_currency_rate_message()`: colores según move_type
+- `_post_print_mode_message()`: notificar cambio
+
+### Documentación Agregada
+
+**CHATTER_EXAMPLES.md**
+- Ejemplos visuales de todos los mensajes
+- Triggers de cada evento
+- Estructura HTML de mensajes
+- Casos de uso completos
+
+---
+
 ## [1.0.0] - 2026-02-02
 
 ### Funcionalidades Agregadas

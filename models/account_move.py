@@ -102,6 +102,164 @@ class AccountMove(models.Model):
             self.invoice_date or fields.Date.today()
         )
 
+    def action_post(self):
+        """
+        Por qué: Informar tasa de cambio al validar factura
+        Patrón: Observer Pattern - notificar validación
+        """
+        res = super().action_post()
+
+        for move in self:
+            if move.currency_id != move.company_id.currency_id:
+                move._post_currency_rate_message('post')
+
+        return res
+
+    def write(self, vals):
+        """
+        Por qué: Detectar cambio en modo de impresión
+        """
+        old_print_flags = {rec.id: rec.print_in_company_currency for rec in self}
+
+        res = super().write(vals)
+
+        if 'print_in_company_currency' in vals:
+            for move in self:
+                old_value = old_print_flags.get(move.id)
+                if old_value != move.print_in_company_currency:
+                    move._post_print_mode_message()
+
+        return res
+
+    def _post_currency_rate_message(self, action_type='post'):
+        """
+        Por qué: Mensaje en chatter con información de tasa en facturas
+        Tip: Diferencia visual según tipo de factura
+        """
+        self.ensure_one()
+
+        rate = self._get_effective_rate()
+        rate_source = 'manual' if self.manual_currency_rate else 'sistema'
+
+        # Por qué: Diferentes iconos y colores según tipo de documento
+        if self.move_type == 'out_invoice':
+            icon = '📄'
+            title = 'Factura de Cliente Validada'
+            color = '#00a09d'
+            bg_color = '#f0f9ff'
+        elif self.move_type == 'in_invoice':
+            icon = '📥'
+            title = 'Factura de Proveedor Validada'
+            color = '#875a7b'
+            bg_color = '#fef5ff'
+        elif self.move_type == 'out_refund':
+            icon = '🔄'
+            title = 'Nota de Crédito Cliente Validada'
+            color = '#f06050'
+            bg_color = '#fff0f0'
+        elif self.move_type == 'in_refund':
+            icon = '↩️'
+            title = 'Nota de Crédito Proveedor Validada'
+            color = '#f06050'
+            bg_color = '#fff0f0'
+        else:
+            icon = '📋'
+            title = 'Asiento Validado'
+            color = '#6c757d'
+            bg_color = '#f8f9fa'
+
+        message = f"""
+        <div style="padding: 10px; border-left: 4px solid {color}; background-color: {bg_color}; margin: 5px 0;">
+            <h4 style="margin: 0 0 10px 0; color: {color};">
+                {icon} {title} - Tipo de Cambio Aplicado
+            </h4>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td style="padding: 5px; font-weight: bold; width: 40%;">Moneda del documento:</td>
+                    <td style="padding: 5px;">{self.currency_id.name} ({self.currency_id.symbol})</td>
+                </tr>
+                <tr>
+                    <td style="padding: 5px; font-weight: bold;">Moneda de la compañía:</td>
+                    <td style="padding: 5px;">{self.company_id.currency_id.name} ({self.company_id.currency_id.symbol})</td>
+                </tr>
+                <tr style="background-color: {bg_color};">
+                    <td style="padding: 5px; font-weight: bold;">Tipo de cambio aplicado:</td>
+                    <td style="padding: 5px; font-size: 16px; font-weight: bold; color: {color};">
+                        1 {self.currency_id.name} = {rate:,.6f} {self.company_id.currency_id.name}
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 5px; font-weight: bold;">Origen de la tasa:</td>
+                    <td style="padding: 5px;">
+                        <span style="background-color: {'#ffd700' if rate_source == 'manual' else '#90ee90'};
+                                     padding: 2px 8px; border-radius: 3px; font-weight: bold;">
+                            {rate_source.upper()}
+                        </span>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 5px; font-weight: bold;">Fecha de referencia:</td>
+                    <td style="padding: 5px;">{self.invoice_date or 'N/A'}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 5px; font-weight: bold;">Total convertido:</td>
+                    <td style="padding: 5px;">
+                        {abs(self.amount_total_signed):,.2f} {self.currency_id.symbol} =
+                        <strong>{abs(self.amount_total_signed) * rate:,.2f} {self.company_id.currency_id.symbol}</strong>
+                    </td>
+                </tr>
+            </table>
+            <p style="margin: 10px 0 0 0; font-size: 12px; color: #666; font-style: italic;">
+                Esta tasa se ha aplicado en los asientos contables generados.
+            </p>
+        </div>
+        """
+
+        self.message_post(
+            body=message,
+            subject=f'Tipo de Cambio Aplicado',
+            message_type='notification',
+            subtype_xmlid='mail.mt_note'
+        )
+
+    def _post_print_mode_message(self):
+        """
+        Por qué: Notificar cambio en modo de impresión para facturas
+        """
+        self.ensure_one()
+
+        if self.print_in_company_currency:
+            icon = '🖨️'
+            mode = f'<strong style="color: #00a09d;">Moneda de la Compañía ({self.company_id.currency_id.name})</strong>'
+            explanation = f'El reporte de factura se imprimirá en {self.company_id.currency_id.name}, ' \
+                         f'aplicando la tasa de cambio configurada.'
+        else:
+            icon = '📄'
+            mode = f'<strong style="color: #875a7b;">Moneda Original ({self.currency_id.name})</strong>'
+            explanation = f'El reporte de factura se imprimirá en {self.currency_id.name}, ' \
+                         f'la moneda original del documento.'
+
+        message = f"""
+        <div style="padding: 10px; border-left: 4px solid #6c757d; background-color: #f8f9fa; margin: 5px 0;">
+            <h4 style="margin: 0 0 10px 0; color: #6c757d;">
+                {icon} Modo de Impresión Modificado
+            </h4>
+            <p style="margin: 5px 0;">
+                <strong>Nuevo modo:</strong> {mode}
+            </p>
+            <p style="margin: 5px 0; font-size: 12px; color: #666; font-style: italic;">
+                {explanation}
+            </p>
+        </div>
+        """
+
+        self.message_post(
+            body=message,
+            subject='Modo de Impresión Modificado',
+            message_type='notification',
+            subtype_xmlid='mail.mt_note'
+        )
+
     def _recompute_dynamic_lines(self, recompute_all_taxes=False, recompute_tax_base_amount=False):
         """
         Por qué: Inyectar tasa manual en recálculo de líneas
