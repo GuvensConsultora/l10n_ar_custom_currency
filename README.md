@@ -1861,6 +1861,134 @@ views/account_move_views.xml:45
 -->
 ```
 
+---
+
+### Error 2: Labels Faltantes para Campos en Vistas
+
+**Fecha:** 2026-02-02
+
+#### Descripción del Error
+
+```
+odoo.tools.convert.ParseError: while parsing /home/odoo/src/user/l10n_ar_custom_currency/views/sale_order_views.xml:8
+
+El nombre de la etiqueta debe contener "para". Para concordar el estilo de la etiqueta sin corresponder al campo o al botón, usa 'class="o_form_label"'.
+
+View error context:
+{'line': 26,
+ 'name': 'sale.order.form.manual.rate'}
+```
+
+#### Causa Raíz
+
+**Por qué:** Odoo 17.0 Enterprise requiere labels explícitos para campos fuera de `<group>`.
+
+```xml
+<!-- ❌ INCORRECTO -->
+<field name="manual_currency_rate" string="Tasa Manual" .../>
+<field name="print_in_company_currency" widget="boolean_toggle"/>
+
+<!-- Problema: Campos sin <label> explícito cuando están fuera de <group> -->
+```
+
+**Regla de Odoo 17:**
+- Campos fuera de `<group>` necesitan `<label for="field_name">` explícito
+- Especialmente crítico para campos con `widget="boolean_toggle"`
+- **Por qué:** Mantiene consistencia en labels y accesibilidad
+- **Tip:** Siempre usar label+field en pares cuando no están en grupo
+
+#### Archivos Afectados
+
+```bash
+views/sale_order_views.xml:19-28
+views/purchase_order_views.xml:17-28
+views/account_move_views.xml:17-31
+```
+
+#### Solución Aplicada
+
+```xml
+<!-- ✅ CORRECTO -->
+<label for="manual_currency_rate" string="Tasa Manual" invisible="not show_manual_rate"/>
+<field name="manual_currency_rate" invisible="not show_manual_rate" .../>
+
+<label for="print_in_company_currency" string="Imprimir en Moneda Compañía" invisible="not show_manual_rate"/>
+<field name="print_in_company_currency" invisible="not show_manual_rate" widget="boolean_toggle"/>
+
+<!-- Por qué funciona:
+     - for="field_name": vincula label con campo
+     - Mejora accesibilidad (click en label foca campo)
+     - Cumple validación de Odoo 17
+-->
+```
+
+**Patrón:** Label-Field Pairing - siempre emparejar label con campo
+
+#### Cambios Técnicos
+
+**1. sale_order_views.xml**
+```xml
+<xpath expr="//field[@name='currency_id']" position="after">
+    <field name="show_manual_rate" invisible="1"/>
++   <label for="manual_currency_rate" string="Tasa Manual" invisible="not show_manual_rate"/>
+    <field
+        name="manual_currency_rate"
+        invisible="not show_manual_rate"
+-       string="Tasa Manual"
+        .../>
++   <label for="print_in_company_currency" string="Imprimir en Moneda Compañía" invisible="not show_manual_rate"/>
+    <field
+        name="print_in_company_currency"
+        invisible="not show_manual_rate"
+        widget="boolean_toggle"/>
+</xpath>
+```
+
+**2. purchase_order_views.xml** - Misma corrección
+
+**3. account_move_views.xml** - Misma corrección
+
+#### Impacto
+
+- ✅ **Visual:** Labels visibles antes de campos
+- ✅ **UX:** Click en label foca campo (mejor usabilidad)
+- ✅ **Accesibilidad:** Screen readers detectan labels correctamente
+- ✅ **Validación:** Cumple requisitos Odoo 17.0+e
+
+#### Lección Aprendida
+
+```python
+# Buena Práctica: Campos fuera de <group>
+# Patrón: Explicit Label-Field Pattern
+
+<label for="field_name" string="Label Text" invisible="condition"/>
+<field name="field_name" invisible="condition" .../>
+
+# Por qué:
+# - for="field_name": vinculación semántica
+# - invisible: MISMO en ambos (label y field)
+# - Mejora accesibilidad y UX
+
+# Tip: SIEMPRE duplicar condiciones invisible en label y field
+```
+
+#### Alternativa Descartada
+
+```xml
+<!-- Alternativa: Usar <group> para auto-labels -->
+<group>
+    <field name="manual_currency_rate"/>
+    <field name="print_in_company_currency"/>
+</group>
+
+<!-- Por qué NO:
+     - Cambia layout visual (layout de 2 columnas)
+     - No permite controlar posicionamiento inline
+     - Los campos están después de currency_id (fuera de grupo)
+     - class="oe_inline" no funciona igual en grupo
+-->
+```
+
 #### Verificación Post-Corrección
 
 **Comando de instalación:**
@@ -1874,6 +2002,7 @@ odoo-bin -u l10n_ar_custom_currency -d database_name
 ✅ Módulo instalado/actualizado correctamente
 ✅ Vistas XML validadas sin errores
 ✅ Formularios renderizan correctamente
+✅ Labels visibles y clickeables
 ```
 
 #### Referencias

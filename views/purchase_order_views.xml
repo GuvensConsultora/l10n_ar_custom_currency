@@ -15,12 +15,13 @@
             -->
             <xpath expr="//field[@name='currency_id']" position="after">
                 <field name="show_manual_rate" invisible="1"/>
+                <label for="manual_currency_rate" string="Tasa Manual" invisible="not show_manual_rate"/>
                 <field
                     name="manual_currency_rate"
                     invisible="not show_manual_rate"
                     class="oe_inline"
-                    string="Tasa Manual"
                     placeholder="Ingrese tasa manual (ej: 1000.00)"/>
+                <label for="print_in_company_currency" string="Imprimir en Moneda Compañía" invisible="not show_manual_rate"/>
                 <field
                     name="print_in_company_currency"
                     invisible="not show_manual_rate"
