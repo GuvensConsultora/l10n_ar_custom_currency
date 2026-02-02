@@ -1989,6 +1989,157 @@ views/account_move_views.xml:17-31
 -->
 ```
 
+---
+
+### Error 3: Campos Requieren Contenedor Group
+
+**Fecha:** 2026-02-02
+
+#### Descripción del Error
+
+```
+odoo.tools.convert.ParseError: while parsing /home/odoo/src/user/l10n_ar_custom_currency/views/sale_order_views.xml:8
+
+El nombre de la etiqueta debe contener "para". Para concordar el estilo de la etiqueta sin corresponder al campo o al botón, usa 'class="o_form_label"'.
+
+View error context:
+{'line': 28,
+ 'name': 'sale.order.form.manual.rate'}
+```
+
+#### Causa Raíz
+
+**Por qué:** Labels y campos sueltos después de `currency_id` necesitan un contenedor `<group>`.
+
+```xml
+<!-- ❌ INCORRECTO -->
+<xpath expr="//field[@name='currency_id']" position="after">
+    <label for="manual_currency_rate" .../>
+    <field name="manual_currency_rate" .../>
+    <label for="print_in_company_currency" .../>
+    <field name="print_in_company_currency" .../>
+</xpath>
+
+<!-- Problema: Elementos sueltos sin contenedor estructural -->
+```
+
+**Regla de Odoo 17:**
+- Campos insertados en vistas necesitan contenedor estructural
+- `<group>` proporciona estructura y genera labels automáticos
+- **Por qué:** Mantiene coherencia en layout del formulario
+- **Tip:** Usar `col="4"` en group para layout horizontal compacto
+
+#### Solución Aplicada
+
+```xml
+<!-- ✅ CORRECTO -->
+<xpath expr="//field[@name='currency_id']" position="after">
+    <field name="show_manual_rate" invisible="1"/>
+    <group invisible="not show_manual_rate" col="4">
+        <field name="manual_currency_rate" string="Tasa Manual" .../>
+        <field name="print_in_company_currency" string="Imprimir en Moneda Compañía" .../>
+    </group>
+</xpath>
+
+<!-- Por qué funciona:
+     - <group>: contenedor estructural requerido
+     - col="4": 4 columnas (2 labels + 2 fields = layout horizontal)
+     - string: group genera labels automáticos
+     - invisible en group: aplica a todos los hijos
+-->
+```
+
+**Patrón:** Container Pattern - agrupar elementos relacionados
+
+#### Cambios Técnicos
+
+**Antes (Error 2):**
+```xml
+<field name="show_manual_rate" invisible="1"/>
+<label for="manual_currency_rate" string="Tasa Manual" invisible="not show_manual_rate"/>
+<field name="manual_currency_rate" invisible="not show_manual_rate" .../>
+<label for="print_in_company_currency" string="Imprimir en Moneda Compañía" invisible="not show_manual_rate"/>
+<field name="print_in_company_currency" invisible="not show_manual_rate" .../>
+```
+
+**Después (Error 3 - Correcto):**
+```xml
+<field name="show_manual_rate" invisible="1"/>
+<group invisible="not show_manual_rate" col="4">
+    <field name="manual_currency_rate" string="Tasa Manual" .../>
+    <field name="print_in_company_currency" string="Imprimir en Moneda Compañía" .../>
+</group>
+```
+
+**Ventajas:**
+- ✅ Labels automáticos generados por `<group>`
+- ✅ Condición `invisible` una sola vez en contenedor
+- ✅ Código más limpio y mantenible
+- ✅ Layout consistente con Odoo estándar
+
+#### Impacto
+
+- ✅ **Visual:** Layout horizontal compacto (col="4")
+- ✅ **Código:** Más simple, menos repetición
+- ✅ **Mantenibilidad:** Condiciones centralizadas en group
+- ✅ **Validación:** Cumple estructura requerida por Odoo 17
+
+#### Lección Aprendida
+
+```python
+# Buena Práctica: Campos personalizados en vistas
+# Patrón: Container Pattern con Group
+
+<group invisible="condition" col="4">
+    <field name="field1" string="Label 1"/>
+    <field name="field2" string="Label 2"/>
+</group>
+
+# Por qué:
+# - Group genera labels automáticos desde string
+# - col="4": 2 fields horizontales (cada field ocupa 2 cols: label+widget)
+# - invisible en group: aplica a todos los campos
+# - Elimina necesidad de <label> explícitos
+
+# Tip: col="2" (vertical), col="4" (horizontal 2 fields)
+```
+
+#### Alternativa Inicial Descartada
+
+```xml
+<!-- Alternativa Error 2: Labels explícitos -->
+<label for="field_name" .../>
+<field name="field_name" .../>
+
+<!-- Por qué NO funcionó:
+     - Necesitan estar dentro de contenedor estructural
+     - Más verboso (label + field por separado)
+     - Repetir invisible en cada elemento
+     - Odoo 17 prefiere structure containers
+-->
+```
+
+#### Archivos Modificados
+
+**1. sale_order_views.xml**
+```xml
+<xpath expr="//field[@name='currency_id']" position="after">
+    <field name="show_manual_rate" invisible="1"/>
++   <group invisible="not show_manual_rate" col="4">
+-       <label for="manual_currency_rate" string="Tasa Manual" invisible="not show_manual_rate"/>
+-       <field name="manual_currency_rate" invisible="not show_manual_rate" .../>
++       <field name="manual_currency_rate" string="Tasa Manual" .../>
+-       <label for="print_in_company_currency" string="Imprimir en Moneda Compañía" invisible="not show_manual_rate"/>
+-       <field name="print_in_company_currency" invisible="not show_manual_rate" .../>
++       <field name="print_in_company_currency" string="Imprimir en Moneda Compañía" .../>
++   </group>
+</xpath>
+```
+
+**2. purchase_order_views.xml** - Misma corrección
+
+**3. account_move_views.xml** - Misma corrección
+
 #### Verificación Post-Corrección
 
 **Comando de instalación:**
@@ -2002,7 +2153,7 @@ odoo-bin -u l10n_ar_custom_currency -d database_name
 ✅ Módulo instalado/actualizado correctamente
 ✅ Vistas XML validadas sin errores
 ✅ Formularios renderizan correctamente
-✅ Labels visibles y clickeables
+✅ Layout horizontal compacto funcionando
 ```
 
 #### Referencias
