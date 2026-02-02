@@ -42,7 +42,7 @@
                             <field name="amount_total_signed_company" widget="monetary"/>
                         </group>
                         <group>
-                            <label string="Tasa aplicada:" class="fw-bold"/>
+                            <label string="Tasa aplicada:" class="o_form_label fw-bold"/>
                             <div>
                                 <field name="manual_currency_rate" readonly="1" class="oe_inline"/>
                                 <span invisible="manual_currency_rate"> (Tasa del sistema)</span>

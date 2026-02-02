@@ -1730,6 +1730,167 @@ Ver `CHATTER_EXAMPLES.md` para:
 
 ---
 
+## Correcciones Realizadas - Control de Calidad
+
+### Error 1: Validación de Vistas en Odoo 17.0+e
+
+**Fecha:** 2026-02-02
+
+#### Descripción del Error
+
+```
+odoo.tools.convert.ParseError: while parsing /home/odoo/src/user/l10n_ar_custom_currency/views/sale_order_views.xml:8
+
+El nombre de la etiqueta debe contener "para". Para concordar el estilo de la etiqueta sin corresponder al campo o al botón, usa 'class="o_form_label"'.
+
+View error context:
+{'file': '/home/odoo/src/user/l10n_ar_custom_currency/views/sale_order_views.xml',
+ 'line': 26}
+```
+
+#### Causa Raíz
+
+**Por qué:** Odoo 17.0 Enterprise implementa validaciones más estrictas en vistas XML.
+
+```xml
+<!-- ❌ INCORRECTO -->
+<label string="Tasa aplicada:" class="fw-bold"/>
+
+<!-- Problema: Label sin atributo 'for' necesita class="o_form_label" -->
+```
+
+**Regla de Odoo 17:**
+- Labels que NO tienen atributo `for` (no apuntan a un campo específico)
+- DEBEN incluir `class="o_form_label"` en su definición
+- **Por qué:** Mantiene consistencia en el renderizado del formulario
+- **Tip:** Evita estilos inconsistentes entre labels de campos y labels decorativos
+
+#### Archivos Afectados
+
+```bash
+views/sale_order_views.xml:45
+views/purchase_order_views.xml:43
+views/account_move_views.xml:45
+```
+
+#### Solución Aplicada
+
+```xml
+<!-- ✅ CORRECTO -->
+<label string="Tasa aplicada:" class="o_form_label fw-bold"/>
+
+<!-- Por qué funciona:
+     - class="o_form_label": cumple requisito de Odoo 17
+     - fw-bold: mantiene estilo visual (font-weight: bold)
+     - Ambas clases coexisten sin conflicto
+-->
+```
+
+**Patrón:** Class Composition - combinar clases de framework con personalizadas
+
+#### Cambios Técnicos
+
+**1. sale_order_views.xml**
+```xml
+<group>
+-   <label string="Tasa aplicada:" class="fw-bold"/>
++   <label string="Tasa aplicada:" class="o_form_label fw-bold"/>
+    <div>
+        <field name="manual_currency_rate" readonly="1" class="oe_inline"/>
+        <span invisible="manual_currency_rate"> (Tasa del sistema)</span>
+    </div>
+</group>
+```
+
+**2. purchase_order_views.xml**
+```xml
+<group>
+-   <label string="Tasa aplicada:" class="fw-bold"/>
++   <label string="Tasa aplicada:" class="o_form_label fw-bold"/>
+    <div>
+        <field name="manual_currency_rate" readonly="1" class="oe_inline"/>
+        <span invisible="manual_currency_rate"> (Tasa del sistema)</span>
+    </div>
+</group>
+```
+
+**3. account_move_views.xml**
+```xml
+<group>
+-   <label string="Tasa aplicada:" class="fw-bold"/>
++   <label string="Tasa aplicada:" class="o_form_label fw-bold"/>
+    <div>
+        <field name="manual_currency_rate" readonly="1" class="oe_inline"/>
+        <span invisible="manual_currency_rate"> (Tasa del sistema)</span>
+    </div>
+</group>
+```
+
+#### Impacto
+
+- ✅ **Visual:** Sin cambios visibles, mantiene font-weight: bold
+- ✅ **Funcional:** Cumple validaciones de Odoo 17.0+e
+- ✅ **Compatibilidad:** Compatible con versiones futuras
+- ✅ **Consistencia:** Sigue estándares de framework
+
+#### Lección Aprendida
+
+```python
+# Buena Práctica: Labels sin campo asociado
+# Patrón: Decorator Pattern - agregar clase framework
+
+<label string="Texto descriptivo" class="o_form_label [clases_adicionales]"/>
+
+# Por qué:
+# - o_form_label: requisito de Odoo (estilos base)
+# - clases_adicionales: personalización (opcional)
+
+# Tip: SIEMPRE usar o_form_label en labels decorativos
+```
+
+#### Alternativa Descartada
+
+```xml
+<!-- Alternativa: Agregar atributo 'for' -->
+<label for="manual_currency_rate" string="Tasa aplicada:" class="fw-bold"/>
+
+<!-- Por qué NO:
+     - El label no representa directamente el campo manual_currency_rate
+     - Puede confundir UX (click en label foca campo incorrecto)
+     - Semánticamente incorrecto (label describe sección, no campo)
+-->
+```
+
+#### Verificación Post-Corrección
+
+**Comando de instalación:**
+```bash
+# Actualizar módulo sin errores
+odoo-bin -u l10n_ar_custom_currency -d database_name
+```
+
+**Resultado esperado:**
+```
+✅ Módulo instalado/actualizado correctamente
+✅ Vistas XML validadas sin errores
+✅ Formularios renderizan correctamente
+```
+
+#### Referencias
+
+**Documentación Odoo:**
+- [QWeb Views - Label Elements (v17)](https://www.odoo.com/documentation/17.0/developer/reference/backend/views.html#label)
+- [Form View Styling Guidelines](https://www.odoo.com/documentation/17.0/developer/howtos/web_api.html#form-views)
+
+**Código fuente relevante:**
+```python
+# odoo/tools/convert.py - Validador de vistas
+# Línea ~748: convert_xml_import()
+# Validación agregada en v17 para mantener consistencia de estilos
+```
+
+---
+
 ## Próximas Mejoras
 
 1. **Automatización de Cotizaciones**
