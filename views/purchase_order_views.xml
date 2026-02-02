@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+        Por qué: Agregar campo de tasa manual en formulario de compras
+        Patrón: View Inheritance - misma lógica que ventas
+    -->
+    <record id="view_purchase_order_form_manual_rate" model="ir.ui.view">
+        <field name="name">purchase.order.form.manual.rate</field>
+        <field name="model">purchase.order</field>
+        <field name="inherit_id" ref="purchase.purchase_order_form"/>
+        <field name="arch" type="xml">
+            <!--
+                Por qué: Posicionar después del campo currency_id
+                Tip: Consistencia con formulario de ventas
+            -->
+            <xpath expr="//field[@name='currency_id']" position="after">
+                <field name="show_manual_rate" invisible="1"/>
+                <field
+                    name="manual_currency_rate"
+                    invisible="not show_manual_rate"
+                    class="oe_inline"
+                    string="Tasa Manual"
+                    placeholder="Ingrese tasa manual (ej: 1000.00)"/>
+                <field
+                    name="print_in_company_currency"
+                    invisible="not show_manual_rate"
+                    widget="boolean_toggle"/>
+            </xpath>
+
+            <!--
+                Por qué: Mostrar montos convertidos
+            -->
+            <xpath expr="//notebook" position="inside">
+                <page string="Montos en Moneda Compañía" invisible="not print_in_company_currency">
+                    <group>
+                        <group>
+                            <field name="company_currency_id" invisible="1"/>
+                            <field name="amount_untaxed_company" widget="monetary"/>
+                            <field name="amount_tax_company" widget="monetary"/>
+                            <field name="amount_total_company" widget="monetary"/>
+                        </group>
+                        <group>
+                            <label string="Tasa aplicada:" class="fw-bold"/>
+                            <div>
+                                <field name="manual_currency_rate" readonly="1" class="oe_inline"/>
+                                <span invisible="manual_currency_rate"> (Tasa del sistema)</span>
+                            </div>
+                        </group>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

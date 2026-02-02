@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+        Por qué: Heredar reporte de factura para imprimir en moneda compañía
+        Patrón: Template Inheritance
+        Tip: account.move usa tax_totals más complejo
+    -->
+
+    <template id="report_invoice_document_inherit" inherit_id="account.report_invoice_document">
+
+        <!--
+            Por qué: Determinar moneda para display
+        -->
+        <xpath expr="//t[@t-set='o']" position="after">
+            <t t-set="doc_currency" t-value="o.company_currency_id if o.print_in_company_currency else o.currency_id"/>
+        </xpath>
+
+        <!--
+            Por qué: Reemplazar precios unitarios
+            Tip: account.move.line no tiene campos *_company, usar conversión directa
+        -->
+        <xpath expr="//span[@t-field='line.price_unit']" position="attributes">
+            <attribute name="t-options" add="{
+                'display_currency': o.company_currency_id if o.print_in_company_currency else o.currency_id
+            }" separator=","/>
+        </xpath>
+
+        <!--
+            Por qué: Modificar subtotales
+        -->
+        <xpath expr="//span[@t-field='line.price_subtotal']" position="attributes">
+            <attribute name="t-options" add="{
+                'display_currency': o.company_currency_id if o.print_in_company_currency else o.currency_id
+            }" separator=","/>
+        </xpath>
+
+        <!--
+            Por qué: Total de la factura
+        -->
+        <xpath expr="//span[@t-field='o.amount_total']" position="replace">
+            <span t-if="o.print_in_company_currency"
+                  t-field="o.amount_total_signed_company"
+                  t-options='{"widget": "monetary", "display_currency": o.company_currency_id}'/>
+            <span t-else=""
+                  t-field="o.amount_total"
+                  t-options='{"widget": "monetary", "display_currency": o.currency_id}'/>
+        </xpath>
+
+        <!--
+            Por qué: Nota sobre conversión
+        -->
+        <xpath expr="//p[@name='payment_communication']" position="after">
+            <div t-if="o.print_in_company_currency and o.currency_id != o.company_currency_id" class="alert alert-info mt-3">
+                <strong>Nota:</strong>
+                Montos expresados en
+                <span t-field="o.company_currency_id.name"/>
+                <span t-if="o.manual_currency_rate">
+                    con tasa de
+                    <span t-field="o.manual_currency_rate"/> por <span t-field="o.currency_id.name"/>.
+                </span>
+                <span t-else="">
+                    según tasa del sistema a la fecha de factura.
+                </span>
+                <br/>
+                <small>Factura original en <span t-field="o.currency_id.name"/>.</small>
+            </div>
+        </xpath>
+
+    </template>
+</odoo>

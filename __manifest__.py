@@ -8,10 +8,10 @@
         Módulo de personalización del sistema de monedas de Odoo para localización Argentina.
 
         Funcionalidades:
-        - Gestión personalizada de tasas de cambio
-        - Automatización de diferencias de cambio
-        - Integración con facturación multimoneda
-        - Reportes específicos de cambio
+        - Tasa de cambio manual en presupuestos de venta
+        - Tasa de cambio manual en órdenes de compra
+        - Propagación de tasa manual a facturas
+        - Aplicación en todo el ciclo de vida del documento
     """,
     'author': 'Tu Empresa',
     'website': 'https://www.tuempresa.com',
@@ -19,12 +19,18 @@
     'depends': [
         'base',
         'account',
+        'sale_management',
+        'purchase',
         'l10n_ar',
     ],
     'data': [
         # 'security/ir.model.access.csv',
-        # 'views/res_currency_views.xml',
-        # 'views/account_move_views.xml',
+        'views/sale_order_views.xml',
+        'views/purchase_order_views.xml',
+        'views/account_move_views.xml',
+        'reports/sale_order_report.xml',
+        'reports/purchase_order_report.xml',
+        'reports/account_move_report.xml',
     ],
     'installable': True,
     'application': False,

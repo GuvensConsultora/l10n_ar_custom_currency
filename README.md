@@ -694,9 +694,664 @@ addons/account/models/account_payment.py          # Líneas 1-1500
 
 ---
 
-## Próximos Pasos - Customización
+## Solución Implementada - Tasa Manual
 
-Este módulo `l10n_ar_custom_currency` permitirá:
+### Funcionalidad Principal
+
+**Problema:** Odoo nativo usa siempre la última tasa configurada en `res.currency.rate`, sin permitir especificar una tasa diferente por transacción.
+
+**Solución:** Agregar campo `manual_currency_rate` en presupuestos (ventas/compras) y facturas, que permite:
+- Cargar tasa manual cuando `currency_id != company_currency_id`
+- Aplicar esa tasa en todo el ciclo de vida del documento
+- Propagar la tasa desde orden → factura
+
+### Modelos Modificados
+
+#### 1. sale.order (Presupuestos de Venta)
+
+```python
+# models/sale_order.py
+
+class SaleOrder(models.Model):
+    _inherit = 'sale.order'
+
+    # Campo principal
+    manual_currency_rate = fields.Float('Tasa de Cambio Manual', digits=(12, 6))
+
+    # Por qué: Visibilidad condicional
+    show_manual_rate = fields.Boolean(compute='_compute_show_manual_rate')
+
+    @api.depends('currency_id', 'company_id')
+    def _compute_show_manual_rate(self):
+        # Muestra campo solo si moneda diferente
+        order.show_manual_rate = order.currency_id != order.company_id.currency_id
+
+    def _prepare_invoice(self):
+        # Propagar tasa manual a factura
+        invoice_vals = super()._prepare_invoice()
+        if self.manual_currency_rate:
+            invoice_vals['manual_currency_rate'] = self.manual_currency_rate
+        return invoice_vals
+
+    def _compute_amounts(self):
+        # Inyectar tasa en contexto
+        if order.manual_currency_rate:
+            order = order.with_context(
+                manual_currency_rate=order.manual_currency_rate
+            )
+        return super()._compute_amounts()
+```
+
+**Flujo:**
+1. Usuario selecciona moneda USD (diferente a ARS)
+2. Campo `manual_currency_rate` se vuelve visible
+3. Usuario ingresa tasa: 1050.00
+4. Al calcular totales, usa tasa 1050 (no la del sistema)
+5. Al crear factura, hereda `manual_currency_rate = 1050.00`
+
+#### 2. purchase.order (Órdenes de Compra)
+
+```python
+# models/purchase_order.py
+
+class PurchaseOrder(models.Model):
+    _inherit = 'purchase.order'
+
+    # Misma lógica que sale.order
+    manual_currency_rate = fields.Float('Tasa de Cambio Manual', digits=(12, 6))
+    show_manual_rate = fields.Boolean(compute='_compute_show_manual_rate')
+
+    def _prepare_invoice(self):
+        # Propagar a factura de proveedor
+        invoice_vals = super()._prepare_invoice()
+        if self.manual_currency_rate:
+            invoice_vals['manual_currency_rate'] = self.manual_currency_rate
+        return invoice_vals
+```
+
+**Consistencia:** Mismo comportamiento en compras y ventas
+
+#### 3. account.move (Facturas)
+
+```python
+# models/account_move.py
+
+class AccountMove(models.Model):
+    _inherit = 'account.move'
+
+    # Heredar tasa de orden o permitir edición manual
+    manual_currency_rate = fields.Float('Tasa de Cambio Manual', digits=(12, 6))
+    show_manual_rate = fields.Boolean(compute='_compute_show_manual_rate')
+
+    def _recompute_dynamic_lines(self, ...):
+        # Inyectar tasa en recálculo de líneas
+        if move.manual_currency_rate:
+            move = move.with_context(
+                manual_currency_rate=move.manual_currency_rate
+            )
+        return super()._recompute_dynamic_lines(...)
+```
+
+**Por qué:** Facturas pueden:
+- Heredar tasa de orden de compra/venta
+- Tener tasa manual si se crean directamente
+
+#### 4. account.move.line (Líneas de Factura)
+
+```python
+# models/account_move.py
+
+class AccountMoveLine(models.Model):
+    _inherit = 'account.move.line'
+
+    def _get_fields_onchange_balance_model(self, ...):
+        # Interceptar conversión de moneda
+        manual_rate = self._context.get('manual_currency_rate')
+        if manual_rate:
+            self = self.with_context(
+                manual_currency_conversion_rate=manual_rate
+            )
+        return super()._get_fields_onchange_balance_model(...)
+```
+
+**Por qué:** Es en las líneas donde Odoo hace la conversión real de montos
+
+### Vistas XML
+
+#### Sale Order
+```xml
+<!-- views/sale_order_views.xml -->
+<xpath expr="//field[@name='currency_id']" position="after">
+    <field name="show_manual_rate" invisible="1"/>
+    <field name="manual_currency_rate"
+           invisible="not show_manual_rate"
+           placeholder="Ingrese tasa manual (ej: 1000.00)"/>
+</xpath>
+```
+
+**Comportamiento UI:**
+- Campo oculto si `currency_id == company_currency_id`
+- Visible automáticamente al cambiar moneda
+- Placeholder con ejemplo
+
+#### Purchase Order
+```xml
+<!-- views/purchase_order_views.xml -->
+<!-- Misma estructura que sale.order -->
+```
+
+#### Account Move
+```xml
+<!-- views/account_move_views.xml -->
+<xpath expr="//field[@name='currency_id']" position="after">
+    <field name="manual_currency_rate"
+           invisible="not show_manual_rate"
+           readonly="state != 'draft'"/>
+</xpath>
+```
+
+**Diferencia:** Campo readonly si factura confirmada
+
+### Ejemplo Completo de Uso
+
+**Caso: Venta USD con Tasa Manual**
+
+```
+1. Crear Presupuesto de Venta
+   - Cliente: Cliente Argentina
+   - Moneda: USD
+   - manual_currency_rate: 1050.00 (visible automáticamente)
+   - Producto: Notebook $100 USD
+
+2. Cálculos en Presupuesto
+   Subtotal USD: 100.00
+   Subtotal ARS: 100.00 × 1050 = 105,000 ARS  ← Usa tasa manual
+
+3. Confirmar Presupuesto → Orden de Venta
+
+4. Crear Factura
+   - manual_currency_rate: 1050.00 (heredado)
+   - Líneas calculan con tasa 1050
+
+5. Factura Generada
+   Ctas x Cobrar    105,000 ARS / 100 USD
+       Ventas                   105,000 ARS / 100 USD
+
+   ✓ Usó tasa 1050, no la del sistema (ej: 1000)
+```
+
+**Diferencia vs Nativo:**
+```python
+# Odoo Nativo:
+# Busca en res.currency.rate la última tasa disponible
+rate = currency._get_rates(company, date)  # → 1000.00
+
+# Con módulo:
+# Si existe manual_currency_rate, usa esa
+rate = manual_currency_rate or currency._get_rates(company, date)  # → 1050.00
+```
+
+### Ventajas de la Solución
+
+1. **No modifica datos nativos**
+   - No altera `res.currency.rate`
+   - No requiere crear tasas ficticias
+
+2. **Propagación automática**
+   - Orden → Factura
+   - Mantiene trazabilidad
+
+3. **Flexible**
+   - Puede dejarse vacío (usa tasa sistema)
+   - O especificarse por transacción
+
+4. **Auditable**
+   - Campo visible en todos los documentos
+   - Se sabe qué tasa se usó
+
+### Patrones Implementados
+
+```python
+# 1. Template Method Pattern
+# Override de métodos de cálculo sin cambiar algoritmo base
+def _compute_amounts(self):
+    if self.manual_currency_rate:
+        self = self.with_context(manual_currency_rate=...)
+    return super()._compute_amounts()
+
+# 2. Context Injection Pattern
+# Pasar parámetros vía contexto en lugar de modificar métodos
+self.with_context(manual_currency_rate=1050.00)
+
+# 3. Propagation Pattern
+# Heredar valores de documento origen
+def _prepare_invoice(self):
+    vals = super()._prepare_invoice()
+    vals['manual_currency_rate'] = self.manual_currency_rate
+    return vals
+
+# 4. Conditional Visibility Pattern
+# Mostrar campos según estado
+show_manual_rate = compute based on currency_id
+```
+
+### Alternativas Descartadas
+
+```python
+# Alternativa 1: Crear res.currency.rate temporal
+# Por qué NO:
+# - Contamina tabla de tasas
+# - Puede afectar otros documentos
+# - Difícil de limpiar
+
+# Alternativa 2: Modificar _get_conversion_rate
+# Por qué NO:
+# - Muy invasivo
+# - Afecta todo el sistema
+# - Dificulta upgrades
+
+# Alternativa 3: Calcular montos manualmente
+# Por qué NO:
+# - Duplica lógica nativa
+# - Propenso a errores
+# - No mantiene consistencia con Odoo
+```
+
+---
+
+## Impresión en Moneda de la Compañía
+
+### Problema
+
+**Caso:** Presupuesto/Factura en USD, pero necesidad de imprimir en ARS.
+
+**Odoo Nativo:** Solo imprime en la moneda del documento (`currency_id`).
+
+### Solución Implementada
+
+Campo `print_in_company_currency` (boolean) que permite:
+- Mantener documento en moneda original (USD)
+- Imprimir reporte en moneda compañía (ARS)
+- Aplicar tasa manual o del sistema
+
+### Campos Computados Agregados
+
+#### En sale.order y purchase.order
+
+```python
+# models/sale_order.py
+
+print_in_company_currency = fields.Boolean('Imprimir en Moneda Compañía')
+
+# Por qué: Campos para mostrar en reportes
+amount_untaxed_company = fields.Monetary(
+    compute='_compute_amounts_company_currency',
+    currency_field='company_currency_id'
+)
+amount_tax_company = fields.Monetary(
+    compute='_compute_amounts_company_currency'
+)
+amount_total_company = fields.Monetary(
+    compute='_compute_amounts_company_currency'
+)
+
+@api.depends('amount_untaxed', 'currency_id', 'manual_currency_rate')
+def _compute_amounts_company_currency(self):
+    for order in self:
+        rate = order._get_effective_rate()  # Manual o sistema
+
+        if order.currency_id == order.company_id.currency_id:
+            # Sin conversión
+            order.amount_untaxed_company = order.amount_untaxed
+            ...
+        else:
+            # Convertir con tasa efectiva
+            order.amount_untaxed_company = order.amount_untaxed * rate
+            order.amount_tax_company = order.amount_tax * rate
+            order.amount_total_company = order.amount_total * rate
+
+def _get_effective_rate(self):
+    # Prioridad: manual_currency_rate > tasa sistema
+    if self.manual_currency_rate:
+        return self.manual_currency_rate
+
+    return self.currency_id._get_conversion_rate(
+        self.currency_id,
+        self.company_id.currency_id,
+        self.company_id,
+        self.date_order
+    )
+```
+
+**Por qué separar en campos:**
+- Computed fields actualizan automáticamente
+- Disponibles en formulario y reportes
+- No modifican montos originales
+
+#### En sale.order.line y purchase.order.line
+
+```python
+# models/sale_order_line.py
+
+# Por qué: Necesario para mostrar detalle en reportes
+price_unit_company = fields.Monetary(
+    compute='_compute_price_company_currency',
+    currency_field='company_currency_id'
+)
+price_subtotal_company = fields.Monetary(
+    compute='_compute_price_company_currency'
+)
+
+@api.depends('price_unit', 'order_id.manual_currency_rate')
+def _compute_price_company_currency(self):
+    for line in self:
+        rate = line.order_id._get_effective_rate()
+
+        if line.order_id.currency_id == line.company_currency_id:
+            line.price_unit_company = line.price_unit
+            line.price_subtotal_company = line.price_subtotal
+        else:
+            line.price_unit_company = line.price_unit * rate
+            line.price_subtotal_company = line.price_subtotal * rate
+```
+
+**Por qué en líneas:**
+- Reportes muestran detalle por producto
+- Cada línea necesita su precio convertido
+
+#### En account.move
+
+```python
+# models/account_move.py
+
+print_in_company_currency = fields.Boolean('Imprimir en Moneda Compañía')
+
+# Por qué: Usa campos *_signed para respetar tipo (invoice/refund)
+amount_untaxed_signed_company = fields.Monetary(
+    compute='_compute_amounts_company_currency'
+)
+amount_tax_signed_company = fields.Monetary(...)
+amount_total_signed_company = fields.Monetary(...)
+
+def _get_effective_rate(self):
+    # Usa invoice_date en lugar de date_order
+    if self.manual_currency_rate:
+        return self.manual_currency_rate
+
+    return self.currency_id._get_conversion_rate(
+        self.currency_id,
+        self.company_id.currency_id,
+        self.company_id,
+        self.invoice_date or fields.Date.today()
+    )
+```
+
+**Diferencia con orders:**
+- Usa `*_signed` (respeta signo de refunds)
+- Fecha de referencia: `invoice_date`
+
+### Reportes QWeb Modificados
+
+#### Estructura de Herencia
+
+```xml
+<!-- reports/sale_order_report.xml -->
+<template id="report_saleorder_document_inherit"
+          inherit_id="sale.report_saleorder_document">
+
+    <!-- 1. Determinar moneda a mostrar -->
+    <xpath expr="//t[@t-set='display_discount']" position="before">
+        <t t-set="doc_currency"
+           t-value="doc.company_currency_id if doc.print_in_company_currency
+                    else doc.currency_id"/>
+    </xpath>
+
+    <!-- 2. Precio unitario por línea -->
+    <xpath expr="//td[@name='td_priceunit']/span" position="replace">
+        <span t-if="doc.print_in_company_currency"
+              t-field="line.price_unit_company"
+              t-options='{"widget": "monetary",
+                          "display_currency": doc.company_currency_id}'/>
+        <span t-else=""
+              t-field="line.price_unit"
+              t-options='{"widget": "monetary",
+                          "display_currency": doc.currency_id}'/>
+    </xpath>
+
+    <!-- 3. Subtotal por línea -->
+    <xpath expr="//td[@name='td_subtotal']/span" position="replace">
+        <span t-if="doc.print_in_company_currency"
+              t-field="line.price_subtotal_company"
+              t-options='{"widget": "monetary",
+                          "display_currency": doc.company_currency_id}'/>
+        <span t-else=""
+              t-field="line.price_subtotal"
+              t-options='{"widget": "monetary",
+                          "display_currency": doc.currency_id}'/>
+    </xpath>
+
+    <!-- 4. Totales del documento -->
+    <xpath expr="//span[@id='amount_total']" position="replace">
+        <span id="amount_total">
+            <span t-if="doc.print_in_company_currency"
+                  t-field="doc.amount_total_company"
+                  t-options='{"widget": "monetary",
+                              "display_currency": doc.company_currency_id}'/>
+            <span t-else=""
+                  t-field="doc.amount_total"
+                  t-options='{"widget": "monetary",
+                              "display_currency": doc.currency_id}'/>
+        </span>
+    </xpath>
+
+    <!-- 5. Nota aclaratoria -->
+    <xpath expr="//div[@id='informations']" position="after">
+        <div t-if="doc.print_in_company_currency and
+                   doc.currency_id != doc.company_currency_id"
+             class="alert alert-info mt-3">
+            <strong>Nota:</strong>
+            Montos expresados en
+            <span t-field="doc.company_currency_id.name"/>
+            <span t-if="doc.manual_currency_rate">
+                aplicando tasa manual de
+                <span t-field="doc.manual_currency_rate"/>
+                por <span t-field="doc.currency_id.name"/>.
+            </span>
+            <span t-else="">
+                aplicando tasa del sistema.
+            </span>
+        </div>
+    </xpath>
+
+</template>
+```
+
+**Por qué usar herencia:**
+- No reescribir template completo
+- Mantener compatibilidad con updates
+- Solo modificar elementos específicos
+
+**Patrón aplicado:**
+```python
+# Patrón: Template Method + Strategy
+# - Template: estructura del reporte (nativo)
+# - Strategy: selección de moneda según flag
+t-value="campo_company if flag else campo_normal"
+```
+
+### Ejemplo Completo de Uso
+
+**Caso: Presupuesto USD → Imprimir ARS**
+
+```
+1. Crear Presupuesto
+   - Moneda: USD
+   - manual_currency_rate: 1050
+   - Producto: Notebook $100 USD
+
+2. Activar impresión compañía
+   - print_in_company_currency: True ✓
+
+3. Vista en formulario
+   Tab "Montos en Moneda Compañía":
+   - Base Imponible: ARS 105,000
+   - Impuestos: ARS 22,050
+   - Total: ARS 127,050
+   - Tasa aplicada: 1050.00
+
+4. Al imprimir PDF
+   Producto         Cant  Precio Unit    Subtotal
+   Notebook           1    105,000.00   105,000.00
+
+   Base Imponible:                      105,000.00
+   Impuestos (21%):                      22,050.00
+   Total:                               127,050.00
+
+   [Nota informativa]
+   Montos expresados en ARS aplicando tasa manual
+   de 1050.00 por USD.
+
+5. Documento sigue en USD
+   - currency_id: USD
+   - amount_total: 127.05 USD
+   - Cálculos internos usan USD
+```
+
+**Diferencia vs Nativo:**
+```
+Odoo Nativo:
+- Documento USD → Imprime USD
+- No permite cambiar moneda en reporte
+
+Con Módulo:
+- Documento USD → Puede imprimir ARS
+- Documento mantiene moneda original
+- Conversión solo visual (reportes)
+```
+
+### Flujo de Datos
+
+```
+                        ┌─────────────────────────┐
+                        │   sale.order (USD)      │
+                        ├─────────────────────────┤
+                        │ currency_id: USD        │
+                        │ amount_total: 127.05    │
+                        │ manual_currency_rate:   │
+                        │   1050.00               │
+                        │ print_in_company_curr:  │
+                        │   True                  │
+                        └─────────────────────────┘
+                                   │
+                    ┌──────────────┴──────────────┐
+                    │                             │
+            ┌───────▼──────────┐      ┌──────────▼─────────┐
+            │ Campos Nativos   │      │ Campos Computed    │
+            ├──────────────────┤      ├────────────────────┤
+            │ amount_untaxed   │      │ amount_untaxed_    │
+            │   = 105.00 USD   │      │   company          │
+            ├──────────────────┤      │   = 105,000 ARS    │
+            │ amount_tax       │      ├────────────────────┤
+            │   = 22.05 USD    │      │ _get_effective_    │
+            ├──────────────────┤      │   rate()           │
+            │ amount_total     │      │   → 1050.00        │
+            │   = 127.05 USD   │      └────────────────────┘
+            └──────────────────┘                │
+                    │                            │
+                    │                            │
+            ┌───────▼────────────────────────────▼────────┐
+            │         Reporte QWeb                        │
+            ├─────────────────────────────────────────────┤
+            │ if print_in_company_currency:               │
+            │   mostrar: amount_total_company (105k ARS)  │
+            │ else:                                        │
+            │   mostrar: amount_total (127.05 USD)        │
+            └─────────────────────────────────────────────┘
+                                   │
+                                   ▼
+                        ┌─────────────────────┐
+                        │    PDF Generado     │
+                        ├─────────────────────┤
+                        │ Total: 127,050 ARS  │
+                        │                     │
+                        │ [Nota: Tasa 1050]   │
+                        └─────────────────────┘
+```
+
+### Ventajas del Enfoque
+
+1. **Separación de Responsabilidades**
+   - Modelo: mantiene moneda original
+   - Computed fields: conversión
+   - Reportes: visualización
+
+2. **No destructivo**
+   - `currency_id` no cambia
+   - `amount_total` mantiene valor USD
+   - Solo campos *_company agregados
+
+3. **Flexible**
+   - Flag activable/desactivable
+   - Mismo documento → múltiples impresiones
+   - Puede imprimir en ambas monedas
+
+4. **Consistente**
+   - Misma tasa en todo el documento
+   - Propaga de orden → factura
+   - Trazabilidad completa
+
+### Casos de Uso
+
+```python
+# Caso 1: Presupuesto cliente Argentina, moneda USD
+# - Necesita ver precio en ARS para aprobar
+sale_order.print_in_company_currency = True
+# Imprime en ARS, mantiene contrato en USD
+
+# Caso 2: Orden de compra importación
+# - Proveedor cobra USD
+# - Contabilidad necesita ver ARS
+purchase_order.print_in_company_currency = True
+# Factura proveedor en USD, reporte interno en ARS
+
+# Caso 3: Factura exportación
+# - Cliente paga USD
+# - Auditoría requiere ver equivalente ARS
+invoice.print_in_company_currency = True
+# Factura legal USD, reporte auditoría ARS
+
+# Caso 4: Cotización alternativa
+# - Mostrar al cliente ambas opciones
+# Imprimir 2 veces:
+#   - print_in_company_currency = False → USD
+#   - print_in_company_currency = True → ARS
+```
+
+### Patrones de Diseño
+
+```python
+# 1. Decorator Pattern
+# Agregar funcionalidad (conversión) sin modificar original
+amount_untaxed_company = amount_untaxed * rate
+
+# 2. Strategy Pattern
+# Selección de estrategia de display según flag
+display_amount = company_amount if flag else original_amount
+
+# 3. Adapter Pattern
+# Adaptar montos de una moneda a otra
+rate = _get_effective_rate()
+adapted_amount = original_amount * rate
+
+# 4. Template Method Pattern (QWeb)
+# Template base con puntos de extensión
+<span t-if="condition" t-field="field_a"/>
+<span t-else="" t-field="field_b"/>
+```
+
+---
+
+## Próximas Mejoras
 
 1. **Automatización de Cotizaciones**
    - Integración con APIs de BCRA

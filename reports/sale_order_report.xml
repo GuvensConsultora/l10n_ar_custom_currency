@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+        Por qué: Heredar template de reporte de presupuesto para mostrar montos en moneda compañía
+        Patrón: Template Inheritance - extender sin reescribir todo
+        Tip: Usar t-if para alternar entre moneda original y compañía
+    -->
+
+    <!-- Override del documento principal -->
+    <template id="report_saleorder_document_inherit" inherit_id="sale.report_saleorder_document">
+
+        <!--
+            Por qué: Reemplazar moneda mostrada en encabezado si print_in_company_currency
+            Tip: t-set redefine variables del template padre
+        -->
+        <xpath expr="//t[@t-set='display_discount']" position="before">
+            <!-- Determinar qué moneda mostrar -->
+            <t t-set="doc_currency" t-value="doc.company_currency_id if doc.print_in_company_currency else doc.currency_id"/>
+        </xpath>
+
+        <!--
+            Por qué: Reemplazar precios unitarios en líneas
+            Tip: Usar campos *_company calculados
+        -->
+        <xpath expr="//td[@name='td_priceunit']/span" position="replace">
+            <span t-if="doc.print_in_company_currency"
+                  t-field="line.price_unit_company"
+                  t-options='{"widget": "monetary", "display_currency": doc.company_currency_id}'/>
+            <span t-else=""
+                  t-field="line.price_unit"
+                  t-options='{"widget": "monetary", "display_currency": doc.currency_id}'/>
+        </xpath>
+
+        <!--
+            Por qué: Reemplazar subtotales por línea
+        -->
+        <xpath expr="//td[@name='td_subtotal']/span" position="replace">
+            <span t-if="doc.print_in_company_currency"
+                  t-field="line.price_subtotal_company"
+                  t-options='{"widget": "monetary", "display_currency": doc.company_currency_id}'/>
+            <span t-else=""
+                  t-field="line.price_subtotal"
+                  t-options='{"widget": "monetary", "display_currency": doc.currency_id}'/>
+        </xpath>
+
+        <!--
+            Por qué: Reemplazar totales del documento
+        -->
+        <xpath expr="//t[@t-set='tax_totals']" position="replace">
+            <t t-set="tax_totals" t-value="doc.tax_totals"/>
+        </xpath>
+
+        <!-- Totales: Base imponible -->
+        <xpath expr="//span[@id='amount_untaxed']" position="replace">
+            <span id="amount_untaxed">
+                <span t-if="doc.print_in_company_currency"
+                      t-field="doc.amount_untaxed_company"
+                      t-options='{"widget": "monetary", "display_currency": doc.company_currency_id}'/>
+                <span t-else=""
+                      t-field="doc.amount_untaxed"
+                      t-options='{"widget": "monetary", "display_currency": doc.currency_id}'/>
+            </span>
+        </xpath>
+
+        <!-- Totales: Impuestos -->
+        <xpath expr="//span[@id='amount_tax']" position="replace">
+            <span id="amount_tax">
+                <span t-if="doc.print_in_company_currency"
+                      t-field="doc.amount_tax_company"
+                      t-options='{"widget": "monetary", "display_currency": doc.company_currency_id}'/>
+                <span t-else=""
+                      t-field="doc.amount_tax"
+                      t-options='{"widget": "monetary", "display_currency": doc.currency_id}'/>
+            </span>
+        </xpath>
+
+        <!-- Totales: Total -->
+        <xpath expr="//span[@id='amount_total']" position="replace">
+            <span id="amount_total">
+                <span t-if="doc.print_in_company_currency"
+                      t-field="doc.amount_total_company"
+                      t-options='{"widget": "monetary", "display_currency": doc.company_currency_id}'/>
+                <span t-else=""
+                      t-field="doc.amount_total"
+                      t-options='{"widget": "monetary", "display_currency": doc.currency_id}'/>
+            </span>
+        </xpath>
+
+        <!--
+            Por qué: Agregar nota indicando moneda y tasa aplicada
+            Tip: Solo se muestra si está en modo impresión compañía
+        -->
+        <xpath expr="//div[@id='informations']" position="after">
+            <div t-if="doc.print_in_company_currency and doc.currency_id != doc.company_currency_id" class="alert alert-info mt-3">
+                <strong>Nota:</strong>
+                Montos expresados en
+                <span t-field="doc.company_currency_id.name"/>
+                <span t-if="doc.manual_currency_rate">
+                    aplicando tasa manual de
+                    <span t-field="doc.manual_currency_rate"/> por <span t-field="doc.currency_id.name"/>.
+                </span>
+                <span t-else="">
+                    aplicando tasa del sistema.
+                </span>
+            </div>
+        </xpath>
+
+    </template>
+</odoo>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+        Por qué: Mostrar tasa manual en facturas (heredada de orden)
+        Patrón: View Inheritance - extender sin modificar
+        Tip: Campo readonly si viene de orden, editable si es manual
+    -->
+    <record id="view_move_form_manual_rate" model="ir.ui.view">
+        <field name="name">account.move.form.manual.rate</field>
+        <field name="model">account.move</field>
+        <field name="inherit_id" ref="account.view_move_form"/>
+        <field name="arch" type="xml">
+            <!--
+                Por qué: Posicionar después del campo currency_id
+                Tip: Permite verificar qué tasa se usó
+            -->
+            <xpath expr="//field[@name='currency_id']" position="after">
+                <field name="show_manual_rate" invisible="1"/>
+                <field
+                    name="manual_currency_rate"
+                    invisible="not show_manual_rate"
+                    class="oe_inline"
+                    string="Tasa Manual"
+                    readonly="state != 'draft'"
+                    placeholder="Tasa heredada o manual"/>
+                <field
+                    name="print_in_company_currency"
+                    invisible="not show_manual_rate"
+                    widget="boolean_toggle"
+                    readonly="state != 'draft'"/>
+            </xpath>
+
+            <!--
+                Por qué: Mostrar montos convertidos en facturas
+            -->
+            <xpath expr="//notebook" position="inside">
+                <page string="Montos en Moneda Compañía" invisible="not print_in_company_currency">
+                    <group>
+                        <group>
+                            <field name="amount_untaxed_signed_company" widget="monetary"/>
+                            <field name="amount_tax_signed_company" widget="monetary"/>
+                            <field name="amount_total_signed_company" widget="monetary"/>
+                        </group>
+                        <group>
+                            <label string="Tasa aplicada:" class="fw-bold"/>
+                            <div>
+                                <field name="manual_currency_rate" readonly="1" class="oe_inline"/>
+                                <span invisible="manual_currency_rate"> (Tasa del sistema)</span>
+                            </div>
+                        </group>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>
