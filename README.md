@@ -1351,6 +1351,385 @@ adapted_amount = original_amount * rate
 
 ---
 
+## Logging Automático en Chatter
+
+### Funcionalidad
+
+El módulo registra automáticamente en el chatter (historial de comunicación) eventos importantes relacionados con tipos de cambio y configuración de impresión.
+
+**Por qué:** Proporciona trazabilidad completa, auditoría y transparencia sobre las tasas aplicadas en cada documento.
+
+### Eventos Registrados
+
+#### 1. Confirmación de Presupuesto de Venta
+
+**Trigger:** `sale.order.action_confirm()`
+
+```python
+# Al confirmar presupuesto USD con tasa manual 1050
+# Se genera mensaje automático en chatter:
+
+✅ Presupuesto Confirmado - Tipo de Cambio Aplicado
+
+┌─────────────────────────────────────────────────────┐
+│ Moneda del documento:     USD ($)                   │
+│ Moneda de la compañía:    ARS ($)                   │
+│ Tipo de cambio aplicado: 1 USD = 1,050.000000 ARS  │
+│ Origen de la tasa:        [MANUAL]                  │
+│ Total convertido:         100.00 $ = 105,000.00 $   │
+└─────────────────────────────────────────────────────┘
+
+Este tipo de cambio se aplicará en toda la documentación
+generada desde este presupuesto.
+```
+
+**Visual:**
+- Color: Azul turquesa (#00a09d)
+- Icono: ✅
+- Badge origen: Dorado (manual) / Verde (sistema)
+
+#### 2. Confirmación de Orden de Compra
+
+**Trigger:** `purchase.order.button_confirm()`
+
+```python
+# Mismo formato que ventas, con color púrpura (#875a7b)
+# Nota específica: "se aplicará en facturas de proveedor"
+```
+
+#### 3. Validación de Facturas
+
+**Trigger:** `account.move.action_post()`
+
+**Tipos soportados:**
+- 📄 `out_invoice`: Factura de Cliente (azul turquesa)
+- 📥 `in_invoice`: Factura de Proveedor (púrpura)
+- 🔄 `out_refund`: Nota de Crédito Cliente (rojo)
+- ↩️ `in_refund`: Nota de Crédito Proveedor (rojo)
+
+```python
+📄 Factura de Cliente Validada - Tipo de Cambio Aplicado
+
+┌─────────────────────────────────────────────────────┐
+│ Moneda del documento:     USD ($)                   │
+│ Moneda de la compañía:    ARS ($)                   │
+│ Tipo de cambio aplicado: 1 USD = 1,050.000000 ARS  │
+│ Origen de la tasa:        [MANUAL]                  │
+│ Fecha de referencia:      2026-02-02                │
+│ Total convertido:         100.00 $ = 105,000.00 $   │
+└─────────────────────────────────────────────────────┘
+
+Esta tasa se ha aplicado en los asientos contables generados.
+```
+
+#### 4. Cambio de Modo de Impresión
+
+**Trigger:** `write({'print_in_company_currency': True/False})`
+
+**Al activar (True):**
+```
+🖨️ Modo de Impresión Modificado
+
+Nuevo modo: Moneda de la Compañía (ARS)
+
+Los reportes se imprimirán en ARS, aplicando la tasa
+de cambio configurada.
+```
+
+**Al desactivar (False):**
+```
+📄 Modo de Impresión Modificado
+
+Nuevo modo: Moneda Original (USD)
+
+Los reportes se imprimirán en USD, la moneda original
+del documento.
+```
+
+### Implementación Técnica
+
+#### Métodos Agregados
+
+```python
+# models/sale_order.py, purchase_order.py, account_move.py
+
+def action_confirm(self):  # o button_confirm() o action_post()
+    """
+    Por qué: Registrar tasa de cambio aplicada al confirmar
+    Patrón: Observer Pattern - notificar evento de confirmación
+    """
+    res = super().action_confirm()
+
+    for record in self:
+        if record.currency_id != record.company_id.currency_id:
+            record._post_currency_rate_message('confirm')
+
+    return res
+
+def write(self, vals):
+    """
+    Por qué: Detectar cambio en flag de impresión
+    Patrón: Observer Pattern - notificar cambios relevantes
+    """
+    old_print_flags = {rec.id: rec.print_in_company_currency for rec in self}
+
+    res = super().write(vals)
+
+    if 'print_in_company_currency' in vals:
+        for record in self:
+            old_value = old_print_flags.get(record.id)
+            if old_value != record.print_in_company_currency:
+                record._post_print_mode_message()
+
+    return res
+
+def _post_currency_rate_message(self, action_type='confirm'):
+    """
+    Por qué: Generar mensaje HTML estético con información de tasa
+    Patrón: Template Pattern - estructura reutilizable
+    Tip: HTML permite formato rico y legible
+    """
+    self.ensure_one()
+
+    rate = self._get_effective_rate()
+    rate_source = 'manual' if self.manual_currency_rate else 'sistema'
+
+    # Generar HTML con información estructurada
+    message = f"""
+    <div style="padding: 10px; border-left: 4px solid {color};
+                background-color: {bg_color}; margin: 5px 0;">
+        <h4 style="margin: 0 0 10px 0; color: {color};">
+            {icon} {title} - Tipo de Cambio Aplicado
+        </h4>
+        <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+                <td style="padding: 5px; font-weight: bold;">
+                    Tipo de cambio aplicado:
+                </td>
+                <td style="padding: 5px; font-size: 16px; font-weight: bold;">
+                    1 {self.currency_id.name} = {rate:,.6f} {company_currency.name}
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 5px; font-weight: bold;">Origen de la tasa:</td>
+                <td style="padding: 5px;">
+                    <span style="background-color: {badge_color};
+                                 padding: 2px 8px; border-radius: 3px;">
+                        {rate_source.upper()}
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <td>Total convertido:</td>
+                <td><strong>{total_converted}</strong></td>
+            </tr>
+        </table>
+    </div>
+    """
+
+    self.message_post(
+        body=message,
+        subject=f'Tipo de Cambio {action_text}',
+        message_type='notification',
+        subtype_xmlid='mail.mt_note'  # No envía email
+    )
+
+def _post_print_mode_message(self):
+    """
+    Por qué: Notificar cambio en modo de impresión
+    Tip: Mensaje conciso pero informativo
+    """
+    # Similar estructura HTML
+    # Informa nuevo modo y sus implicaciones
+```
+
+### Características del Formato
+
+**HTML Estético:**
+- Bordes coloreados según tipo de documento
+- Tablas organizadas y legibles
+- Badges visuales para origen de tasa
+- Iconos emoji para identificación rápida
+- Colores corporativos de Odoo
+
+**Badges de Origen:**
+- `[MANUAL]`: Badge dorado (#ffd700) - Tasa ingresada manualmente
+- `[SISTEMA]`: Badge verde (#90ee90) - Tasa del sistema
+
+**No Intrusivo:**
+- `message_type='notification'`
+- `subtype_xmlid='mail.mt_note'` → No envía emails
+- Solo visible en chatter del documento
+
+### Ventajas
+
+#### 1. Auditoría Completa
+
+```python
+# Por qué: Cada cambio queda registrado
+# - Timestamp automático (fecha y hora)
+# - Usuario que realizó la acción
+# - Historial inmutable y cronológico
+
+# Ejemplo de búsqueda:
+# "¿Qué tasa se usó en factura FAC-2024-001?"
+# → Buscar en chatter: mensaje con tipo de cambio
+```
+
+#### 2. Transparencia
+
+```python
+# Por qué: Información clara y visible
+# - Tasa aplicada con 6 decimales
+# - Origen explícito (manual vs sistema)
+# - Total convertido calculado
+# - Fecha de referencia (en facturas)
+
+# Beneficio: Equipo completo puede verificar
+```
+
+#### 3. Trazabilidad
+
+```python
+# Por qué: Seguimiento completo del documento
+# - Confirmación: tasa registrada
+# - Cambio de modo: registrado
+# - Orden cronológico de eventos
+# - Búsqueda en comunicaciones
+
+# Ejemplo: Rastrear por qué un documento
+# se imprimió en ARS cuando estaba en USD
+```
+
+#### 4. Sin Emails
+
+```python
+# Por qué: No genera spam
+# - Solo visible en chatter
+# - Acceso bajo demanda
+# - No molesta a usuarios
+# - Información disponible cuando se necesita
+```
+
+### Casos de Uso
+
+#### Caso 1: Auditoría de Tasa Aplicada
+
+```
+Situación: Auditor pregunta qué tasa se usó en presupuesto
+
+Solución:
+1. Abrir presupuesto
+2. Ver chatter
+3. Mensaje muestra:
+   - Tasa: 1050.000000
+   - Origen: MANUAL
+   - Fecha: 2026-02-02 15:30
+   - Usuario: Juan Pérez
+```
+
+#### Caso 2: Verificación de Modo de Impresión
+
+```
+Situación: Cliente recibió factura en ARS, esperaba USD
+
+Solución:
+1. Abrir factura
+2. Ver chatter
+3. Mensaje muestra:
+   - Modo cambiado a "Moneda Compañía (ARS)"
+   - Fecha del cambio
+   - Usuario que lo modificó
+```
+
+#### Caso 3: Rastreo de Cambios
+
+```
+Situación: Factura tiene tasa diferente a lo esperado
+
+Solución:
+1. Ver chatter de factura
+2. Ver chatter de orden de compra origen
+3. Comparar tasas registradas
+4. Identificar en qué punto cambió
+```
+
+### Colores por Tipo de Documento
+
+| Documento | Icono | Color | Código |
+|-----------|-------|-------|--------|
+| Presupuesto Venta | ✅ | Azul turquesa | #00a09d |
+| Orden Compra | ✅ | Púrpura | #875a7b |
+| Factura Cliente | 📄 | Azul turquesa | #00a09d |
+| Factura Proveedor | 📥 | Púrpura | #875a7b |
+| Nota Créd. Cliente | 🔄 | Rojo | #f06050 |
+| Nota Créd. Proveedor | ↩️ | Rojo | #f06050 |
+| Cambio Modo | 🖨️/📄 | Gris | #6c757d |
+
+### Ejemplo Completo de Flujo
+
+```
+1. Usuario crea presupuesto USD
+   - Ingresa manual_currency_rate: 1050
+
+2. Usuario confirma presupuesto
+   → Chatter: ✅ "Tasa aplicada: 1050 [MANUAL]"
+
+3. Cliente pide ver en ARS
+   - Usuario activa print_in_company_currency
+   → Chatter: 🖨️ "Modo: Moneda Compañía (ARS)"
+
+4. Se genera factura desde presupuesto
+   - Hereda manual_currency_rate: 1050
+
+5. Usuario valida factura
+   → Chatter: 📄 "Tasa aplicada: 1050 [MANUAL]"
+
+6. Auditor revisa
+   - Ve historial completo en chatter
+   - Trazabilidad: presupuesto → factura
+   - Tasa consistente en todo el flujo
+```
+
+### Patrones Implementados
+
+```python
+# 1. Observer Pattern
+# Notificar eventos de confirmación y cambios
+action_confirm() → _post_currency_rate_message()
+write() → detecta cambio → _post_print_mode_message()
+
+# 2. Template Pattern
+# Estructura de mensaje reutilizable con variaciones
+_post_currency_rate_message(action_type)
+# - Mismo formato base
+# - Varía: color, icono, texto según tipo
+
+# 3. Factory Pattern
+# Selección de formato según move_type
+if move_type == 'out_invoice':
+    icon, color = '📄', '#00a09d'
+elif move_type == 'in_invoice':
+    icon, color = '📥', '#875a7b'
+# etc.
+
+# 4. Decorator Pattern
+# Agregar logging sin modificar flujo original
+res = super().action_confirm()
+# ... logging ...
+return res
+```
+
+### Documentación Adicional
+
+Ver `CHATTER_EXAMPLES.md` para:
+- Ejemplos visuales de todos los mensajes
+- Estructura HTML completa
+- Más casos de uso detallados
+- Guía de colores y estilos
+
+---
+
 ## Próximas Mejoras
 
 1. **Automatización de Cotizaciones**
